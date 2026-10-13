@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core import security
@@ -99,11 +100,7 @@ def verify_login_code(db: Session, email: str, code: str) -> TokenOut:
 
 	login_code.used_at = now
 
-	user = db.scalar(select(User).where(User.email == email))
-	if user is None:
-		user = User(email=email)
-		db.add(user)
-		db.flush()
+	user = _get_or_create_user(db, email)
 	if not user.is_active:
 		db.commit()
 		raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is disabled.")
@@ -154,6 +151,34 @@ def logout(db: Session, refresh_token: str) -> None:
 	if stored is not None and stored.revoked_at is None:
 		stored.revoked_at = _now()
 		db.commit()
+
+
+def _find_user(db: Session, email: str) -> User | None:
+	return db.scalar(select(User).where(User.email == email))
+
+
+def _get_or_create_user(db: Session, email: str) -> User:
+	"""Find the user, creating them on first login.
+
+	The insert runs in a savepoint so that if a concurrent request creates the
+	same user between our lookup and insert, the unique index on email rejects
+	ours and we fall back to the row that won instead of failing the login.
+	"""
+	user = _find_user(db, email)
+	if user is not None:
+		return user
+
+	try:
+		with db.begin_nested():
+			user = User(email=email)
+			db.add(user)
+			db.flush()
+		return user
+	except IntegrityError:
+		user = _find_user(db, email)
+		if user is None:
+			raise
+		return user
 
 
 def _issue_tokens(db: Session, user: User) -> TokenOut:

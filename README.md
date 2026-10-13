@@ -28,6 +28,7 @@ app/
 └── routes/
     └── auth.py        Auth endpoints + get_current_user dependency
 alembic/               Database migrations
+tests/                 pytest suite
 ```
 
 ## Setup
@@ -86,6 +87,22 @@ Passwordless: the user enters an email, receives a 6-digit code, and exchanges i
 - Requesting a new code invalidates previous ones; requests are limited to 5 per 10 minutes per email.
 - Refresh tokens rotate on every use. Replaying a rotated token revokes all of that user's refresh tokens.
 - `request-code` responds identically for known and unknown emails.
+
+## Testing
+
+```bash
+pytest
+```
+
+Tests run against a separate `<dbname>_test` Postgres database (created automatically from your `DATABASE_URL`, with tables built from the models). They use fake secrets and an in-memory mailer, so dev data and the real Brevo API are never touched. Tables are truncated between tests.
+
+| File | Covers |
+|---|---|
+| `test_user_creation.py` | When users are created, re-login, email normalization, disabled accounts, validation |
+| `test_login_codes.py` | Hashing, single use, expiry, attempt lockout, rate limiting |
+| `test_tokens.py` | Refresh rotation, replay detection, logout, JWT validation |
+| `test_mailer.py` | Console vs Brevo selection, Brevo request shape, provider failure handling |
+| `test_concurrency.py` | Concurrent first-login and double-submit races |
 
 ## Migrations
 
